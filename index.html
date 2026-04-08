@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Haggerston — next trains</title>
+<meta name="description" content="A friendly model-railway dashboard showing the next trains from Haggerston in both directions.">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky: #c8e4f0;
+    --sky-top: #a8d2e8;
+    --sky-low: #e8d8c0;
+    --hill: #7fa85a;
+    --hill-dark: #5e8438;
+    --grass: #9bc06a;
+    --track: #6b4226;
+    --track-dark: #3d2410;
+    --ink: #1a1a1a;
+    --cream: #faf4e0;
+    --red: #c94545;
+    --blue: #4a7bb8;
+    --warn: #e8a030;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--sky);
+    color: var(--ink);
+    font-family: 'Patrick Hand', 'Comic Sans MS', cursive;
+    font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    position: relative;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ============ TOP BAR ============ */
+  .topbar {
+    background: var(--cream);
+    border-bottom: 3px solid var(--ink);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 20;
+  }
+  .topbar .title {
+    font-family: 'Kalam', cursive;
+    font-weight: 700;
+    font-size: 26px;
+    flex: 1;
+  }
+  .topbar .title::before { content: "🚂 "; }
+  .topbar .clock {
+    font-family: 'Kalam', cursive;
+    font-weight: 700;
+    font-size: 20px;
+    background: white;
+    padding: 4px 14px;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+  }
+  .refresh {
+    background: white;
+    border: 2px solid var(--ink);
+    padding: 6px 14px;
+    border-radius: 50px;
+    font-family: 'Patrick Hand', cursive;
+    font-size: 15px;
+    cursor: pointer;
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+  }
+  .refresh:hover { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(0,0,0,0.15); }
+
+  /* ============ MAIN STAGE ============ */
+  .stage {
+    flex: 1;
+    display: grid;
+    grid-template-rows: 1fr auto 1fr;
+    min-height: 0;
+    position: relative;
+  }
+
+  /* ============ SCENES (TOP & BOTTOM) ============ */
+  .scene {
+    position: relative;
+    overflow: hidden;
+  }
+  .scene.top {
+    background: linear-gradient(to bottom, var(--sky-top) 0%, var(--sky) 60%, #d0e0c8 100%);
+  }
+  .scene.bottom {
+    background: linear-gradient(to bottom, #d0e0c8 0%, var(--grass) 60%, #8ab25a 100%);
+  }
+  .scene .sun {
+    position: absolute;
+    top: 10px;
+    right: 30px;
+    width: 56px;
+    height: 56px;
+    background: #fce98a;
+    border: 3px solid var(--ink);
+    border-radius: 50%;
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.08);
+  }
+  .scene .cloud {
+    position: absolute;
+    width: 80px;
+    height: 32px;
+    background: white;
+    border: 2.5px solid var(--ink);
+    border-radius: 40px;
+  }
+  .scene .cloud::before, .scene .cloud::after {
+    content: "";
+    position: absolute;
+    background: white;
+    border: 2.5px solid var(--ink);
+    border-radius: 50%;
+  }
+  .scene .cloud::before { width: 30px; height: 30px; top: -16px; left: 12px; }
+  .scene .cloud::after { width: 22px; height: 22px; top: -10px; right: 14px; }
+  .scene.top .cloud-1 { top: 20%; left: 18%; animation: drift 90s linear infinite; }
+  .scene.top .cloud-2 { top: 40%; left: 60%; animation: drift 120s linear infinite; }
+
+  /* rolling hills inside each scene */
+  .scene svg.hills {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 60%;
+    pointer-events: none;
+  }
+
+  /* ============ TRACK ============ */
+  .scene .track {
+    position: absolute;
+    bottom: 18px;
+    left: 0;
+    right: 0;
+    height: 30px;
+  }
+  .scene .track .ballast {
+    position: absolute;
+    top: 22px;
+    left: 0; right: 0;
+    height: 8px;
+    background: #b8a880;
+    opacity: 0.6;
+  }
+  .scene .track .sleepers {
+    position: absolute;
+    top: 14px;
+    left: 0; right: 0;
+    height: 10px;
+    background: repeating-linear-gradient(
+      to right,
+      var(--track) 0,
+      var(--track) 14px,
+      transparent 14px,
+      transparent 28px
+    );
+  }
+  .scene .track .rail {
+    position: absolute;
+    left: 0; right: 0;
+    height: 3px;
+    background: var(--track-dark);
+  }
+  .scene .track .rail-1 { top: 4px; }
+  .scene .track .rail-2 { top: 10px; }
+
+  /* ============ TRAINS ============ */
+  .train {
+    position: absolute;
+    bottom: 22px;
+    width: 180px;
+    height: 90px;
+    transform-origin: bottom center;
+  }
+  .train svg { width: 100%; height: 100%; display: block; }
+
+  /* Northbound train goes RIGHT → LEFT (in the top scene, "heading north" toward Dalston) */
+  .train.north {
+    animation: chugLeft 50s linear infinite;
+    transform: scaleX(-1); /* flip so it faces left */
+  }
+  @keyframes chugLeft {
+    0%   { right: -200px; }
+    100% { right: 100vw; }
+  }
+
+  /* Southbound train goes LEFT → RIGHT */
+  .train.south {
+    animation: chugRight 50s linear infinite;
+  }
+  @keyframes chugRight {
+    0%   { left: -200px; }
+    100% { left: 100vw; }
+  }
+
+  .train .bob { animation: bob 0.4s ease-in-out infinite alternate; transform-origin: bottom center; }
+  @keyframes bob {
+    from { transform: translateY(0); }
+    to { transform: translateY(-1.5px); }
+  }
+  .steam {
+    position: absolute;
+    top: -6px;
+    left: 80px;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    opacity: 0;
+    animation: puff 2s ease-out infinite;
+  }
+  .steam.s2 { animation-delay: 0.6s; left: 72px; }
+  .steam.s3 { animation-delay: 1.2s; left: 88px; }
+  @keyframes puff {
+    0% { opacity: 0; transform: translate(0, 0) scale(0.5); }
+    30% { opacity: 0.9; }
+    100% { opacity: 0; transform: translate(-24px, -46px) scale(1.5); }
+  }
+
+  /* ============ CENTRE TIMETABLE ============ */
+  .timetable {
+    background: var(--cream);
+    border-top: 4px solid var(--ink);
+    border-bottom: 4px solid var(--ink);
+    padding: 10px 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.15);
+    z-index: 10;
+    max-height: 42vh;
+    min-height: 180px;
+    position: relative;
+  }
+  .timetable::before, .timetable::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    height: 6px;
+    background: repeating-linear-gradient(
+      45deg,
+      #1a1a1a 0 6px,
+      var(--cream) 6px 12px
+    );
+    opacity: 0.4;
+  }
+  .timetable::before { top: -10px; }
+  .timetable::after { bottom: -10px; }
+
+  .direction {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .direction h3 {
+    font-family: 'Kalam', cursive;
+    font-weight: 700;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .direction.north h3 { color: var(--blue); }
+  .direction.south h3 { color: var(--red); }
+  .direction h3 .arrow { font-size: 20px; }
+  .direction .sub {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
+    margin-bottom: 8px;
+  }
+
+  .next {
+    background: white;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.12);
+  }
+  .next .time {
+    font-family: 'Kalam', cursive;
+    font-weight: 700;
+    font-size: 32px;
+    line-height: 1;
+  }
+  .direction.north .next .time { color: var(--blue); }
+  .direction.south .next .time { color: var(--red); }
+  .next .to {
+    font-size: 14px;
+    color: #444;
+    margin-top: 2px;
+  }
+
+  .upcoming-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 4px;
+  }
+  .upcoming-list::-webkit-scrollbar { width: 8px; }
+  .upcoming-list::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); border-radius: 4px; }
+  .upcoming-list::-webkit-scrollbar-thumb { background: var(--ink); border-radius: 4px; }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 4px 2px;
+    border-bottom: 1px dashed rgba(0,0,0,0.18);
+    font-size: 14px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .t {
+    font-family: 'Kalam', cursive;
+    font-weight: 700;
+    font-size: 17px;
+    min-width: 58px;
+  }
+  .direction.north .row .t { color: var(--blue); }
+  .direction.south .row .t { color: var(--red); }
+  .row .d {
+    flex: 1;
+    text-align: right;
+    color: #555;
+    padding-left: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loading, .empty {
+    padding: 12px;
+    color: #888;
+    font-style: italic;
+    text-align: center;
+  }
+  .empty { color: var(--red); }
+
+  /* on narrow screens, stack the columns */
+  @media (max-width: 640px) {
+    .timetable { grid-template-columns: 1fr; max-height: 48vh; }
+    .train { width: 130px; height: 66px; }
+    .direction .sub { display: none; }
+  }
+
+  .footer {
+    position: absolute;
+    bottom: 2px;
+    left: 8px;
+    font-size: 11px;
+    color: rgba(0,0,0,0.4);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="topbar">
+    <div class="title">Haggerston Station</div>
+    <div class="clock" id="clock">--:--</div>
+    <button class="refresh" onclick="loadArrivals()">↻ Refresh</button>
+  </div>
+
+  <div class="stage">
+    <!-- TOP SCENE: northbound -->
+    <div class="scene top">
+      <div class="sun"></div>
+      <div class="cloud cloud-1"></div>
+      <div class="cloud cloud-2"></div>
+      <svg class="hills" viewBox="0 0 1200 200" preserveAspectRatio="none">
+        <path d="M0 130 Q200 70 400 110 Q600 150 800 90 Q1000 40 1200 100 L1200 200 L0 200 Z"
+              fill="#7fa85a" stroke="#1a1a1a" stroke-width="3"/>
+        <path d="M0 160 Q300 120 600 150 Q900 180 1200 140 L1200 200 L0 200 Z"
+              fill="#9bc06a" stroke="#1a1a1a" stroke-width="3"/>
+        <g transform="translate(260, 140)">
+          <rect x="-3" y="0" width="6" height="14" fill="#6b4226" stroke="#1a1a1a" stroke-width="2"/>
+          <circle cx="0" cy="-3" r="11" fill="#5e8438" stroke="#1a1a1a" stroke-width="2"/>
+        </g>
+        <g transform="translate(880, 135)">
+          <rect x="-3" y="0" width="6" height="14" fill="#6b4226" stroke="#1a1a1a" stroke-width="2"/>
+          <circle cx="0" cy="-3" r="13" fill="#5e8438" stroke="#1a1a1a" stroke-width="2"/>
+        </g>
+      </svg>
+      <div class="track">
+        <div class="ballast"></div>
+        <div class="sleepers"></div>
+        <div class="rail rail-1"></div>
+        <div class="rail rail-2"></div>
+      </div>
+      <!-- Blue northbound engine -->
+      <div class="train north">
+        <div class="bob">
+          <div class="steam s1"></div>
+          <div class="steam s2"></div>
+          <div class="steam s3"></div>
+          <svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="44" width="44" height="36" fill="#3a5a7a" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="10" y="48" width="32" height="6" fill="#1a1a1a"/>
+            <circle cx="14" cy="84" r="7" fill="#1a1a1a"/><circle cx="14" cy="84" r="2.5" fill="#888"/>
+            <circle cx="38" cy="84" r="7" fill="#1a1a1a"/><circle cx="38" cy="84" r="2.5" fill="#888"/>
+            <rect x="48" y="42" width="90" height="38" rx="3" fill="#4a7bb8" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="116" y="26" width="36" height="54" rx="3" fill="#4a7bb8" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="122" y="34" width="22" height="18" rx="2" fill="#c8e4f0" stroke="#1a1a1a" stroke-width="2"/>
+            <circle cx="133" cy="46" r="6" fill="#fce0a8" stroke="#1a1a1a" stroke-width="1.5"/>
+            <circle cx="130" cy="45" r="1" fill="#1a1a1a"/><circle cx="136" cy="45" r="1" fill="#1a1a1a"/>
+            <path d="M130 49 Q133 51 136 49" stroke="#1a1a1a" stroke-width="1" fill="none"/>
+            <path d="M127 40 L139 40 L137 37 L129 37 Z" fill="#1a1a1a"/>
+            <circle cx="62" cy="60" r="5" fill="#f5c518" stroke="#1a1a1a" stroke-width="2"/>
+            <rect x="80" y="28" width="12" height="16" fill="#4a7bb8" stroke="#1a1a1a" stroke-width="2"/>
+            <rect x="76" y="24" width="20" height="5" fill="#1a1a1a"/>
+            <ellipse cx="102" cy="42" rx="8" ry="5" fill="#f5c518" stroke="#1a1a1a" stroke-width="2"/>
+            <circle cx="62" cy="84" r="10" fill="#1a1a1a"/><circle cx="62" cy="84" r="3.5" fill="#888"/>
+            <line x1="52" y1="84" x2="72" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="62" y1="74" x2="62" y2="94" stroke="#888" stroke-width="1.5"/>
+            <circle cx="98" cy="84" r="12" fill="#1a1a1a"/><circle cx="98" cy="84" r="4" fill="#888"/>
+            <line x1="86" y1="84" x2="110" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="98" y1="72" x2="98" y2="96" stroke="#888" stroke-width="1.5"/>
+            <circle cx="134" cy="84" r="10" fill="#1a1a1a"/><circle cx="134" cy="84" r="3.5" fill="#888"/>
+            <line x1="124" y1="84" x2="144" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="134" y1="74" x2="134" y2="94" stroke="#888" stroke-width="1.5"/>
+            <line x1="62" y1="84" x2="134" y2="84" stroke="#555" stroke-width="2.5"/>
+            <rect x="152" y="54" width="8" height="26" fill="#1a1a1a"/>
+            <rect x="160" y="62" width="4" height="10" fill="#4a7bb8" stroke="#1a1a1a" stroke-width="2"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTRE TIMETABLE -->
+    <div class="timetable">
+      <div class="direction north">
+        <h3><span class="arrow">←</span> Northbound</h3>
+        <div class="sub">Toward Dalston / Highbury &amp; Islington</div>
+        <div id="northNext"></div>
+        <div class="upcoming-list" id="northList">
+          <div class="loading">Checking the signals…</div>
+        </div>
+      </div>
+      <div class="direction south">
+        <h3>Southbound <span class="arrow">→</span></h3>
+        <div class="sub">Change at Whitechapel for Westminster</div>
+        <div id="southNext"></div>
+        <div class="upcoming-list" id="southList">
+          <div class="loading">Checking the signals…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM SCENE: southbound -->
+    <div class="scene bottom">
+      <svg class="hills" viewBox="0 0 1200 200" preserveAspectRatio="none">
+        <path d="M0 120 Q250 60 500 100 Q750 140 1000 80 Q1100 60 1200 90 L1200 200 L0 200 Z"
+              fill="#7fa85a" stroke="#1a1a1a" stroke-width="3"/>
+        <path d="M0 150 Q200 120 500 140 Q800 170 1200 130 L1200 200 L0 200 Z"
+              fill="#9bc06a" stroke="#1a1a1a" stroke-width="3"/>
+        <g transform="translate(400, 130)">
+          <rect x="-16" y="-16" width="32" height="20" fill="white" stroke="#1a1a1a" stroke-width="2.5"/>
+          <path d="M-20 -16 L0 -30 L20 -16 Z" fill="#c94545" stroke="#1a1a1a" stroke-width="2.5" stroke-linejoin="round"/>
+          <rect x="-3" y="-8" width="6" height="12" fill="#6b4226" stroke="#1a1a1a" stroke-width="2"/>
+        </g>
+        <g transform="translate(900, 135)">
+          <rect x="-3" y="0" width="6" height="14" fill="#6b4226" stroke="#1a1a1a" stroke-width="2"/>
+          <circle cx="0" cy="-3" r="12" fill="#5e8438" stroke="#1a1a1a" stroke-width="2"/>
+        </g>
+      </svg>
+      <div class="track">
+        <div class="ballast"></div>
+        <div class="sleepers"></div>
+        <div class="rail rail-1"></div>
+        <div class="rail rail-2"></div>
+      </div>
+      <!-- Red southbound engine -->
+      <div class="train south">
+        <div class="bob">
+          <div class="steam s1"></div>
+          <div class="steam s2"></div>
+          <div class="steam s3"></div>
+          <svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="44" width="44" height="36" fill="#5a3a2a" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="10" y="48" width="32" height="6" fill="#2a1810"/>
+            <circle cx="14" cy="84" r="7" fill="#1a1a1a"/><circle cx="14" cy="84" r="2.5" fill="#888"/>
+            <circle cx="38" cy="84" r="7" fill="#1a1a1a"/><circle cx="38" cy="84" r="2.5" fill="#888"/>
+            <rect x="48" y="42" width="90" height="38" rx="3" fill="#c94545" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="116" y="26" width="36" height="54" rx="3" fill="#c94545" stroke="#1a1a1a" stroke-width="3"/>
+            <rect x="122" y="34" width="22" height="18" rx="2" fill="#a8d2e8" stroke="#1a1a1a" stroke-width="2"/>
+            <circle cx="133" cy="46" r="6" fill="#fce0a8" stroke="#1a1a1a" stroke-width="1.5"/>
+            <circle cx="130" cy="45" r="1" fill="#1a1a1a"/><circle cx="136" cy="45" r="1" fill="#1a1a1a"/>
+            <path d="M130 49 Q133 51 136 49" stroke="#1a1a1a" stroke-width="1" fill="none"/>
+            <path d="M127 40 L139 40 L137 37 L129 37 Z" fill="#1a1a1a"/>
+            <circle cx="62" cy="60" r="5" fill="#f5c518" stroke="#1a1a1a" stroke-width="2"/>
+            <rect x="80" y="28" width="12" height="16" fill="#c94545" stroke="#1a1a1a" stroke-width="2"/>
+            <rect x="76" y="24" width="20" height="5" fill="#1a1a1a"/>
+            <ellipse cx="102" cy="42" rx="8" ry="5" fill="#f5c518" stroke="#1a1a1a" stroke-width="2"/>
+            <circle cx="62" cy="84" r="10" fill="#1a1a1a"/><circle cx="62" cy="84" r="3.5" fill="#888"/>
+            <line x1="52" y1="84" x2="72" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="62" y1="74" x2="62" y2="94" stroke="#888" stroke-width="1.5"/>
+            <circle cx="98" cy="84" r="12" fill="#1a1a1a"/><circle cx="98" cy="84" r="4" fill="#888"/>
+            <line x1="86" y1="84" x2="110" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="98" y1="72" x2="98" y2="96" stroke="#888" stroke-width="1.5"/>
+            <circle cx="134" cy="84" r="10" fill="#1a1a1a"/><circle cx="134" cy="84" r="3.5" fill="#888"/>
+            <line x1="124" y1="84" x2="144" y2="84" stroke="#888" stroke-width="1.5"/>
+            <line x1="134" y1="74" x2="134" y2="94" stroke="#888" stroke-width="1.5"/>
+            <line x1="62" y1="84" x2="134" y2="84" stroke="#555" stroke-width="2.5"/>
+            <rect x="152" y="54" width="8" height="26" fill="#1a1a1a"/>
+            <rect x="160" y="62" width="4" height="10" fill="#c94545" stroke="#1a1a1a" stroke-width="2"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">Data: TfL Unified API. Unofficial.</div>
+</div>
+
+<script>
+const STATION_ID = '910GHAGGERS';
+const API_URL = `https://api.tfl.gov.uk/StopPoint/${STATION_ID}/Arrivals`;
+
+// Southbound destinations (toward Whitechapel / south)
+const SOUTH_KEYWORDS = ['Whitechapel', 'Shadwell', 'Surrey Quays', 'New Cross', 'Crystal Palace', 'West Croydon', 'Clapham Junction', 'Peckham'];
+// Northbound destinations (toward Dalston / Highbury)
+const NORTH_KEYWORDS = ['Dalston', 'Highbury', 'Islington', 'Stratford'];
+
+function formatMins(seconds) {
+  const mins = Math.round(seconds / 60);
+  if (mins <= 0) return 'due';
+  if (mins === 1) return '1 min';
+  return mins + ' mins';
+}
+
+function classifyDirection(arrival) {
+  // Platform name is most reliable ("Southbound - Platform 1" / "Northbound - Platform 2")
+  if (arrival.platformName) {
+    if (/south/i.test(arrival.platformName)) return 'south';
+    if (/north/i.test(arrival.platformName)) return 'north';
+  }
+  const dest = (arrival.destinationName || arrival.towards || '').toLowerCase();
+  if (SOUTH_KEYWORDS.some(k => dest.includes(k.toLowerCase()))) return 'south';
+  if (NORTH_KEYWORDS.some(k => dest.includes(k.toLowerCase()))) return 'north';
+  return 'unknown';
+}
+
+function updateClock() {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('clock').textContent = `${hh}:${mm}`;
+}
+
+function renderDirection(dirKey, trains) {
+  const nextEl = document.getElementById(dirKey + 'Next');
+  const listEl = document.getElementById(dirKey + 'List');
+
+  if (trains.length === 0) {
+    nextEl.innerHTML = '';
+    listEl.innerHTML = '<div class="empty">No trains showing</div>';
+    return;
+  }
+
+  const next = trains[0];
+  nextEl.innerHTML = `
+    <div class="next">
+      <div class="time">${formatMins(next.timeToStation)}</div>
+      <div class="to">to ${next.destinationName || next.towards || 'unknown'}</div>
+    </div>
+  `;
+
+  // Show the rest
+  const rest = trains.slice(1);
+  if (rest.length === 0) {
+    listEl.innerHTML = '<div class="loading">No further trains in data</div>';
+    return;
+  }
+  listEl.innerHTML = rest.map(t => `
+    <div class="row">
+      <span class="t">${formatMins(t.timeToStation)}</span>
+      <span class="d">${t.destinationName || t.towards || '?'}</span>
+    </div>
+  `).join('');
+}
+
+async function loadArrivals() {
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error('TfL returned ' + res.status);
+    const data = await res.json();
+
+    const north = data.filter(a => classifyDirection(a) === 'north').sort((a,b) => a.timeToStation - b.timeToStation);
+    const south = data.filter(a => classifyDirection(a) === 'south').sort((a,b) => a.timeToStation - b.timeToStation);
+
+    renderDirection('north', north);
+    renderDirection('south', south);
+  } catch (err) {
+    document.getElementById('northList').innerHTML = `<div class="empty">Can't reach TfL: ${err.message}</div>`;
+    document.getElementById('southList').innerHTML = '';
+  }
+}
+
+updateClock();
+setInterval(updateClock, 1000 * 30);
+loadArrivals();
+setInterval(loadArrivals, 30000);
+</script>
+</body>
+</html>
